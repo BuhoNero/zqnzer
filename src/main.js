@@ -1,6 +1,6 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
-import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js?v=202611192134';
-import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192134';
+import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js?v=202611192158';
+import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192158';
 
 const S = load();
 const decoded = new Map(); // sample name -> AudioBuffer (all preloaded so switching is instant)
@@ -38,13 +38,13 @@ async function setSample(t, name) {
 }
 
 function trigger(t, when, step) {
-  const tr = S.tracks[t], sd = snd(t);
+  const sd = snd(t); // per pattern: sample, trim, vol, fx
   const st = step ?? { pitch: 0, fx: 0 };
   const len = play(buf(t), {
     track: t, start: sd.start, end: sd.end,
-    vol: tr.vol,
+    vol: sd.vol,
     pitch: st.pitch || 0,
-    fx: clamp(tr.fx + st.fx, -1, 1),
+    fx: clamp(sd.fx + st.fx, -1, 1),
   }, when);
   if (t === S.sel) playhead = { at: when || ctx.currentTime, len, t };
 }
@@ -166,7 +166,7 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
   xyGesture(el, {
     label: () => `Track ${t + 1}`,
     y: VOL_AXIS,
-    getTarget: () => S.tracks[t],
+    getTarget: () => snd(t), // vol/fx live in the current pattern
     onDragStart: () => { S.sel = t; },
     onLongPress: () => {
       if (mode === 'pattern') return false;
@@ -445,7 +445,7 @@ function render() {
     el.classList.toggle('has-cur', pm && Math.floor(S.pat / STEPS) === t);
     el.classList.toggle('muted', !!S.tracks[t].mute);
     el.lastChild.textContent = snd(t).sample.replace(/\.wav$/, '');
-    setSquare(el, S.tracks[t].vol, S.tracks[t].fx);
+    setSquare(el, snd(t).vol, snd(t).fx);
   });
   const r = row(S.sel);
   $pads.style.setProperty('--c', COL[S.sel]);

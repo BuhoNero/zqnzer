@@ -1,6 +1,6 @@
 // Song state + localStorage persistence.
-// Song = 4 mixer tracks (vol, fx) + 64 patterns (4 banks × 16).
-// A pattern = steps for the 4 tracks + the 4 sounds it uses (sample + trim).
+// Song = 4 tracks (mute) + 64 patterns (4 banks × 16).
+// A pattern = steps for the 4 tracks + the 4 sounds it uses (sample, trim, vol, fx).
 
 const KEY = 'zqnzer.v1';
 export const STEPS = 16;
@@ -12,9 +12,9 @@ const DEFAULT_SAMPLES = ['kick.wav', 'snare.wav', 'hat-closed.wav', 'bass-c.wav'
 const newStep = () => ({ on: false, pitch: 0, fx: 0 });
 const newRow = () => Array.from({ length: STEPS }, newStep);
 const newSteps = () => Array.from({ length: TRACKS }, newRow);
-const newSound = (sample) => ({ sample, start: 0, end: 1 });
+const newSound = (sample) => ({ sample, start: 0, end: 1, vol: 0.8, fx: 0 });
 const defaultSounds = () => DEFAULT_SAMPLES.map(newSound);
-const newTrack = () => ({ vol: 0.8, fx: 0 });
+const newTrack = () => ({ mute: false });
 
 function demo() {
   const s = {
@@ -30,7 +30,7 @@ function demo() {
   on(3, 0, 3, 8, 11, 14);
   [0, 0, 0, 3, 0, 0, 0, 0, 7, 0, 0, 5, 0, 0, -2, 0].forEach((v, i) => (p[3][i].pitch = v));
   p[1][12].fx = -0.5;
-  s.tracks[2].vol = 0.55;
+  s.patterns[0].sounds[2].vol = 0.55;
   return s;
 }
 
@@ -42,13 +42,19 @@ function migrate(s) {
     s.pat = 0;
   }
   // v2: patterns were bare step arrays and sounds lived on the tracks
-  const sounds = s.tracks.map((t) => newSound(t.sample ?? 'kick.wav'));
+  const sounds = s.tracks.map((t) => ({ ...newSound(t.sample ?? 'kick.wav'), vol: t.vol ?? 0.8, fx: t.fx ?? 0 }));
   s.tracks.forEach((t, i) => {
     if (t.start !== undefined) Object.assign(sounds[i], { start: t.start, end: t.end });
     delete t.steps; delete t.sample; delete t.start; delete t.end;
   });
   s.patterns = s.patterns.map((p) =>
     Array.isArray(p) ? { steps: p, sounds: structuredClone(sounds) } : p);
+  // v3: vol/fx lived on the tracks (song-wide) → copy into every pattern's sounds
+  s.patterns.forEach((p) => p?.sounds.forEach((sd, t) => {
+    if (sd.vol === undefined) sd.vol = s.tracks[t].vol ?? 0.8;
+    if (sd.fx === undefined) sd.fx = s.tracks[t].fx ?? 0;
+  }));
+  s.tracks.forEach((t) => { delete t.vol; delete t.fx; });
   return s;
 }
 
