@@ -126,16 +126,28 @@ html[data-mode="pattern"] .pad.cur::after { filter: brightness(1.1); box-shadow:
 #patbtn { min-width: 56px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #patbtn.active { background: var(--pat); color: #fff; }
 
-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-footer button { border: 0; background: #0003; border-radius: 12px; height: 52px; padding: 0 16px;
+footer { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+footer button { border: 0; background: #0003; border-radius: 12px; height: 52px; padding: 0 12px; flex: none;
   touch-action: manipulation; }
 footer button:active { filter: brightness(.85); }
-#play { font-size: 24px; width: 64px; height: 64px; border-radius: 50%; background: #eee; color: #222; }
-#tempo { display: flex; align-items: center; gap: 4px; margin: 0 auto; }
-#tempo button { width: 38px; font-size: 22px; padding: 0; }
-#bpm { min-width: 64px; white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; font-size: 16px;
+/* play: a backlit key like the pads; never shrinks (it was squashed into an oval on narrow phones) */
+#play { flex: none; width: 64px; height: 64px; aspect-ratio: 1; padding: 0; border-radius: 12px; font-size: 22px;
+  color: #fff; --lit: #fff;
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--lit) 16%, #4a4a4a),
+    color-mix(in srgb, var(--lit) 8%, #303030) 80%);
+  box-shadow: inset 0 1px 0 #ffffff1f, inset 0 -3px 4px #0006, 0 2px 0 #000c;
+  transition: transform .08s, box-shadow .08s; }
+#play:active { transform: translateY(2px) scale(.97); filter: none;
+  box-shadow: inset 0 1px 0 #ffffff14, inset 0 -1px 2px #0006; }
+#play.on { color: #222;
+  background: radial-gradient(circle at 50% 48%, #fff 0%, #f2f2f2 42%, #b8b8b8 100%);
+  box-shadow: inset 0 1px 0 #ffffff1f, inset 0 -3px 4px #0003, 0 2px 0 #000c, 0 0 18px -3px #ffffffb0; }
+#tempo { display: flex; align-items: center; gap: 2px; margin: 0 auto; min-width: 0; }
+#tempo button { width: 36px; font-size: 22px; padding: 0; }
+#bpm { min-width: 44px; display: flex; flex-direction: column; align-items: center; line-height: 1.05; white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; font-size: 16px;
   touch-action: none; cursor: ns-resize; }
 #clear { font-size: 15px; }
+#bpm b { font-size: 18px; } #bpm small { font-size: 10px; opacity: .6; letter-spacing: .06em; }
 #build { font-size: 10px; opacity: .35; text-align: right; }
 
 #hud { position: fixed; left: 50%; top: max(16px, env(safe-area-inset-top)); transform: translateX(-50%);

@@ -411,8 +411,9 @@ function render() {
   pb.textContent = patName(S.pat);
   pb.classList.toggle('active', pm);
   $('sname').textContent = snd(S.sel).sample.replace(/\.wav$/, '');
-  $('bpm').textContent = `${S.bpm} bpm`;
-  $play.textContent = clock.running ? '■' : '▶';
+  $('bpm').innerHTML = `<b>${S.bpm}</b><small>BPM</small>`;
+  $play.textContent = clock.running ? '■︎' : '▶︎'; // text glyphs, not emoji
+  $play.classList.toggle('on', clock.running);
   drawWave();
 }
 
