@@ -52,6 +52,23 @@ function migrate(s) {
   return s;
 }
 
+/** Project file: the whole song (tempo, mixer, all banks/patterns with their sounds). */
+export function toFile(s) {
+  return { app: 'zqnzer', format: 1, exported: new Date().toISOString(), song: s };
+}
+/** Parse a project file (or a bare song) into a current-format song; throws if it isn't one. */
+export function fromFile(o) {
+  const s = o && o.app === 'zqnzer' ? o.song : o;
+  if (!s || !Array.isArray(s.tracks) || s.tracks.length !== TRACKS) throw new Error('Not a Zqnzer project');
+  const song = migrate(structuredClone(s));
+  if (!Array.isArray(song.patterns)) throw new Error('Not a Zqnzer project');
+  song.patterns = Array.from({ length: PATTERNS }, (_, i) => song.patterns[i] ?? null);
+  song.pat = Math.min(Math.max(0, song.pat | 0), PATTERNS - 1);
+  song.sel = Math.min(Math.max(0, song.sel | 0), TRACKS - 1);
+  song.bpm = Math.min(200, Math.max(50, +song.bpm || 120));
+  return song;
+}
+
 export function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));

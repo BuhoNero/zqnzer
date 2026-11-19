@@ -1,6 +1,6 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
-import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js';
-import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps } from './state.js';
+import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js?v=202611192134';
+import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192134';
 
 const S = load();
 const decoded = new Map(); // sample name -> AudioBuffer (all preloaded so switching is instant)
@@ -24,7 +24,9 @@ let viewBank = Math.floor(S.pat / STEPS);
 
 // ---------- samples ----------
 async function ensure(name) {
-  if (!decoded.has(name)) decoded.set(name, await loadSample(name));
+  if (!decoded.has(name)) {
+    try { decoded.set(name, await loadSample(name)); } catch { console.warn('missing sample', name); }
+  }
   return decoded.get(name);
 }
 async function setSample(t, name) {
@@ -222,20 +224,78 @@ function cycleSample(dir) {
 }
 $('prev').onclick = () => cycleSample(-1);
 $('next').onclick = () => cycleSample(1);
+// bottom sheet: a list of {label, hint?, cur?, action}
 const sheet = $('sheet');
-$('sname').onclick = () => {
+function openSheet(items, title) {
   const ul = sheet.querySelector('ul');
   ul.innerHTML = '';
-  for (const name of sampleList) {
+  if (title) { const h = document.createElement('li'); h.className = 'title'; h.textContent = title; ul.append(h); }
+  for (const it of items) {
     const li = document.createElement('li');
-    li.textContent = name.replace(/\.wav$/, '');
-    li.classList.toggle('cur', name === snd(S.sel).sample);
-    li.onclick = (e) => { e.stopPropagation(); setSample(S.sel, name).then(() => trigger(S.sel)); sheet.hidden = true; };
+    li.textContent = it.label;
+    if (it.hint) { const h = document.createElement('small'); h.textContent = it.hint; li.append(h); }
+    li.classList.toggle('cur', !!it.cur);
+    li.onclick = (e) => { e.stopPropagation(); sheet.hidden = true; it.action(); };
     ul.append(li);
   }
   sheet.hidden = false;
-};
+}
 sheet.onclick = () => (sheet.hidden = true);
+$('sname').onclick = () => openSheet(sampleList.map((name) => ({
+  label: name.replace(/\.wav$/, ''),
+  cur: name === snd(S.sel).sample,
+  action: () => setSample(S.sel, name).then(() => trigger(S.sel)),
+})));
+
+// ---------- options: project export / import ----------
+const stampName = () => {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  return `zqnzer-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
+};
+const projectFile = () => new File([JSON.stringify(toFile(S))], stampName(), { type: 'application/json' });
+const usedPatterns = () => S.patterns.filter((p) => !isEmpty(p)).length;
+function flash(text, ms = 1600) { showHud(text); setTimeout(() => hud.classList.remove('show'), ms); }
+
+function exportProject() {
+  const f = projectFile(), url = URL.createObjectURL(f);
+  const a = Object.assign(document.createElement('a'), { href: url, download: f.name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  flash(`Saved ${f.name}`);
+}
+async function shareProject() {
+  try { await navigator.share({ files: [projectFile()], title: 'Zqnzer project' }); }
+  catch (e) { if (e.name !== 'AbortError') exportProject(); } // fall back to a download
+}
+const fileIn = Object.assign(document.createElement('input'), { type: 'file', accept: '.json,application/json' });
+fileIn.onchange = async () => {
+  const f = fileIn.files[0];
+  fileIn.value = '';
+  if (!f) return;
+  let song;
+  try { song = fromFile(JSON.parse(await f.text())); }
+  catch { return flash('That file is not a Zqnzer project'); }
+  const n = song.patterns.filter((p) => !isEmpty(p)).length;
+  if (!confirm(`Replace the current project with "${f.name}" (${n} pattern${n === 1 ? '' : 's'})?
+Export first if you want to keep the current one.`)) return;
+  if (clock.running) $play.onclick();
+  for (const k of Object.keys(S)) delete S[k];
+  Object.assign(S, song);
+  mode = 'steps'; copySrc = null; viewBank = Math.floor(S.pat / STEPS);
+  setTempo(S.bpm);
+  persist();
+  await Promise.all(S.patterns.flatMap((p) => p?.sounds.map((x) => ensure(x.sample)) ?? []));
+  render();
+  flash('Project imported');
+};
+$('menu').onclick = () => {
+  const canShare = !!navigator.canShare?.({ files: [projectFile()] });
+  openSheet([
+    { label: 'Export project', hint: `${usedPatterns()} patterns · saves a .json file`, action: exportProject },
+    ...(canShare ? [{ label: 'Share project…', hint: 'send to Drive, email, chat…', action: shareProject }] : []),
+    { label: 'Import project…', hint: 'replaces the current project', action: () => fileIn.click() },
+  ], 'Options');
+};
 
 // transport
 const $play = $('play');
