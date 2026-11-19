@@ -52,6 +52,8 @@ button { font: inherit; color: inherit; touch-action: none; }
 .pad::before { content: attr(data-pitch); position: absolute; left: 10%; bottom: 8%;
   font-size: clamp(10px, 3vw, 14px); font-weight: 600; color: #0009; pointer-events: none; }
 .track::after { background: #fff; }
+.scope { position: absolute; left: 8%; right: 8%; bottom: 8%; height: 42%; width: 84%;
+  pointer-events: none; }
 .pad::after { background: #000; }
 
 footer { display: flex; align-items: center; gap: 12px; margin-top: 4px; }

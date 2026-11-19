@@ -58,6 +58,18 @@ export function loadSample(name) {
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 
+// Per-track meter taps (post track volume). Analysers must be pulled by the graph,
+// so they feed a silent gain into the destination.
+const silent = ctx.createGain();
+silent.gain.value = 0;
+silent.connect(ctx.destination);
+export const meters = Array.from({ length: 4 }, () => {
+  const a = ctx.createAnalyser();
+  a.fftSize = 1024;
+  a.connect(silent);
+  return a;
+});
+
 // Choke: each track cuts its previous voice, like a hardware groove box.
 const lastVoice = [];
 
@@ -87,6 +99,7 @@ export function play(buf, p, when = 0) {
   amp.gain.setValueAtTime(v, when + Math.max(0.002, len - 0.006));
   amp.gain.linearRampToValueAtTime(0, when + len);
   src.connect(amp);
+  if (meters[p.track]) amp.connect(meters[p.track]);
 
   const fx = clamp(p.fx, -1, 1);
   const dry = ctx.createGain();

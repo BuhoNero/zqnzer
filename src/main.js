@@ -1,5 +1,5 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
-import { ctx, loadSample, play, createClock, setTempo } from './audio.js';
+import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js';
 import { STEPS, TRACKS, load, save, clearTrack } from './state.js';
 
 const S = load();
@@ -98,6 +98,9 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
   slot.className = 'slot';
   const el = document.createElement('button');
   el.className = 'btn track';
+  const scope = document.createElement('canvas');
+  scope.className = 'scope';
+  el.append(scope);
   slot.append(el);
   $tracks.append(slot);
   xyGesture(el, {
@@ -296,7 +299,38 @@ function frame() {
     padEls.forEach((el, s) => el.classList.toggle('now', s === curStep));
   }
   drawWave();
+  drawScopes();
   requestAnimationFrame(frame);
+}
+
+// ---------- per-track mini scopes ----------
+const scopeData = new Float32Array(1024);
+const scopeIdle = [];
+function drawScopes() {
+  trackEls.forEach((el, t) => {
+    const c = el.firstChild, g2 = c.getContext('2d');
+    const dpr = devicePixelRatio, W = c.clientWidth * dpr, H = c.clientHeight * dpr;
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; scopeIdle[t] = false; }
+    meters[t].getFloatTimeDomainData(scopeData);
+    let peak = 0;
+    for (let i = 0; i < scopeData.length; i += 4) peak = Math.max(peak, Math.abs(scopeData[i]));
+    const silent = peak < 0.002;
+    if (silent && scopeIdle[t]) return; // already drawn flat
+    scopeIdle[t] = silent;
+
+    g2.clearRect(0, 0, W, H);
+    g2.lineWidth = 2 * dpr;
+    g2.lineJoin = 'round';
+    g2.strokeStyle = silent ? '#ffffff40' : '#8ff5e6';
+    g2.beginPath();
+    const n = 96, stride = scopeData.length / n, mid = H / 2;
+    for (let i = 0; i < n; i++) {
+      const v = clamp(scopeData[Math.floor(i * stride)] * 1.6, -1, 1);
+      const x = (i / (n - 1)) * W, y = mid - v * (H / 2 - g2.lineWidth);
+      i ? g2.lineTo(x, y) : g2.moveTo(x, y);
+    }
+    g2.stroke();
+  });
 }
 
 // ---------- boot ----------
