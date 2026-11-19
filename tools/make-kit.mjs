@@ -76,6 +76,47 @@ function metal(sec, decay) {
     * env(t, decay) + noise() * env(t, decay) * 0.3), 7000);
 }
 
-const names = Object.entries(kit).map(([n, f]) => writeWav(n, f()));
+// 2-pole state-variable lowpass with resonance; cutoff may change per sample (fc(i)).
+function svf(d, fc, q = 0.7) { let lo = 0, bd = 0;
+  return d.map((x, i) => { const f = 2 * Math.sin(Math.PI * Math.min(fc(i), SR / 6) / SR);
+    lo += f * bd; const hi = x - lo - bd / q * 1; bd += f * hi; return lo; }); }
+const C2 = 65.41;
+const saw = (t, f) => ((t * f) % 1) * 2 - 1;
+
+// Added later; generated after the original kit so the originals stay byte-identical.
+const extra = {
+  'snare-tight.wav': () => { let ph = 0; const body = render(0.18, (t) => {
+    ph += 2 * Math.PI * (260 + 90 * Math.exp(-t / 0.01)) / SR; return Math.sin(ph) * env(t, 0.03); });
+    const nz = hp(render(0.18, (t) => noise() * env(t, 0.045)), 3000);
+    return body.map((x, i) => sat(x * 0.6 + nz[i], 2)); },
+  'snare-fat.wav': () => { let ph = 0; const body = render(0.55, (t) => {
+    ph += 2 * Math.PI * (150 + 80 * Math.exp(-t / 0.03)) / SR; return Math.sin(ph) * env(t, 0.1); });
+    const nz = lp(hp(render(0.55, (t) => noise() * env(t, 0.2)), 700), 7000);
+    return body.map((x, i) => sat(x + nz[i] * 0.9, 2.5)); },
+  'snare-808.wav': () => { let a = 0, b = 0; const nz = hp(render(0.4, (t) => noise() * env(t, 0.13)), 2000);
+    return nz.map((x, i) => { const t = i / SR; a += 2 * Math.PI * 238 / SR; b += 2 * Math.PI * 476 / SR;
+      return (Math.sin(a) * env(t, 0.06) * 0.8 + Math.sin(b) * env(t, 0.03) * 0.4) + x * 0.7; }); },
+  'snare-lofi.wav': () => { let ph = 0; const raw = render(0.3, (t) => {
+    ph += 2 * Math.PI * (200 + 50 * Math.exp(-t / 0.02)) / SR;
+    return Math.sin(ph) * env(t, 0.05) * 0.8 + noise() * env(t, 0.08); });
+    let held = 0; // 8 kHz sample-and-hold + 5-bit crush
+    return lp(raw.map((x, i) => (i % 5 === 0 ? (held = Math.round(x * 16) / 16) : held)), 6000); },
+  'bass-sub.wav': () => { let ph = 0; return render(1.2, (t) => {
+    ph += 2 * Math.PI * (C2 * (1 + 0.6 * Math.exp(-t / 0.015))) / SR;
+    return sat(Math.sin(ph) * env(t, 0.6) * Math.min(1, t * 2000), 1.8); }); },
+  'bass-square.wav': () => { const s = render(0.7, (t) => (((t * C2) % 1) < 0.35 ? 1 : -1) * env(t, 0.3) * Math.min(1, t * 1500));
+    return lp(lp(s, 900), 1400); },
+  'bass-acid.wav': () => svf(render(0.5, (t) => saw(t, C2) * Math.min(1, t * 1500) * (t < 0.42 ? 1 : env(t - 0.42, 0.015))),
+    (i) => 180 + 2600 * Math.exp(-i / SR / 0.09), 6).map((x) => sat(x * 0.6, 2)),
+  'bass-pluck.wav': () => svf(render(0.45, (t) => (saw(t, C2) + saw(t, C2 * 2) * 0.4) * env(t, 0.16) * Math.min(1, t * 2000)),
+    (i) => 120 + 3500 * Math.exp(-i / SR / 0.04), 1.2),
+  'bass-reese.wav': () => lp(render(1.0, (t) => (saw(t, C2 * 0.993) + saw(t, C2 * 1.007) + saw(t, C2 * 0.5) * 0.5)
+    * Math.min(1, t * 300) * (t < 0.85 ? 1 : env(t - 0.85, 0.04))), 700).map((x) => sat(x * 0.8, 1.6)),
+};
+
+const written = [...Object.entries(kit), ...Object.entries(extra)].map(([n, f]) => writeWav(n, f()));
+// list order: kicks, snares, the rest of the drums, then basses and synths
+const rank = (n) => (/^kick/.test(n) ? 0 : /^snare/.test(n) ? 1 : /^bass/.test(n) ? 3 : /^stab/.test(n) ? 4 : 2);
+const names = written.map((n, i) => [n, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([n]) => n);
 fs.writeFileSync(path.join(out, 'index.json'), JSON.stringify(names, null, 1));
 console.log(`wrote ${names.length} samples to ${out}`);

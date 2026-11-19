@@ -2,6 +2,10 @@
  "kick.wav",
  "kick-short.wav",
  "snare.wav",
+ "snare-tight.wav",
+ "snare-fat.wav",
+ "snare-808.wav",
+ "snare-lofi.wav",
  "clap.wav",
  "rim.wav",
  "hat-closed.wav",
@@ -10,5 +14,10 @@
  "shaker.wav",
  "cowbell.wav",
  "bass-c.wav",
+ "bass-sub.wav",
+ "bass-square.wav",
+ "bass-acid.wav",
+ "bass-pluck.wav",
+ "bass-reese.wav",
  "stab-chord.wav"
 ]

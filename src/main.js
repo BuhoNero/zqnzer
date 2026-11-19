@@ -157,7 +157,7 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
     onDragStart: () => { S.sel = t; },
     onTap: () => {
       if (mode === 'pattern') { viewBank = t; render(); return; }
-      S.sel = t; trigger(t); persist(); render();
+      S.sel = t; persist(); render(); // select only, no audition
     },
   });
   return el;
@@ -392,7 +392,10 @@ function frame() {
 // ---------- per-track mini scopes ----------
 const scopeData = new Float32Array(1024);
 const scopeIdle = [];
+let scopeMode = '';
 function drawScopes() {
+  if (scopeMode !== mode) { scopeMode = mode; scopeIdle.length = 0; } // recolour on mode change
+  const live = mode === 'pattern' ? '#ff7ae0' : '#8ff5e6';
   trackEls.forEach((el, t) => {
     const c = el.firstChild, g2 = c.getContext('2d');
     const dpr = devicePixelRatio, W = c.clientWidth * dpr, H = c.clientHeight * dpr;
@@ -407,7 +410,7 @@ function drawScopes() {
     g2.clearRect(0, 0, W, H);
     g2.lineWidth = 2 * dpr;
     g2.lineJoin = 'round';
-    g2.strokeStyle = silent ? '#ffffff40' : '#8ff5e6';
+    g2.strokeStyle = silent ? '#ffffff40' : live;
     g2.beginPath();
     const n = 96, stride = scopeData.length / n, mid = H / 2;
     for (let i = 0; i < n; i++) {
