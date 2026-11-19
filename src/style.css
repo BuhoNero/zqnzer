@@ -45,6 +45,8 @@ button { font: inherit; color: inherit; touch-action: none; }
 .btn::after { content: ""; position: absolute; width: 18%; height: 18%;
   left: calc(8% + var(--x, .5) * 66%); top: calc(8% + (1 - var(--y, .8)) * 66%);
   pointer-events: none; }
+.pad::before { content: attr(data-pitch); position: absolute; left: 10%; bottom: 8%;
+  font-size: clamp(10px, 3vw, 14px); font-weight: 600; color: #0009; pointer-events: none; }
 .track::after { background: #fff; }
 .pad::after { background: #000; }
 

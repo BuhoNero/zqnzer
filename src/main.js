@@ -22,13 +22,14 @@ async function setSample(t, name, resetTrim = true) {
 
 function trigger(t, when, step) {
   const tr = S.tracks[t];
-  const st = step ?? { vol: 1, fx: 0 };
-  play(buffers[t], {
+  const st = step ?? { pitch: 0, fx: 0 };
+  const len = play(buffers[t], {
     track: t, start: tr.start, end: tr.end,
-    vol: tr.vol * st.vol,
+    vol: tr.vol,
+    pitch: st.pitch || 0,
     fx: clamp(tr.fx + st.fx, -1, 1),
   }, when);
-  if (t === S.sel) playhead = { at: when ?? ctx.currentTime, t };
+  if (t === S.sel) playhead = { at: when || ctx.currentTime, len, t };
 }
 
 // ---------- clock ----------
@@ -39,15 +40,17 @@ const clock = createClock(() => S.bpm, (step, time) => {
 });
 
 // ---------- gestures ----------
-// Tap → onTap. Drag → XY control: up/down = volume, left = reverb, right = delay.
+// Tap → onTap. Drag → XY control: x = reverb ← dry → delay, y = an axis (volume or pitch).
 const hud = $('hud');
-function showHud(vol, fx, label) {
-  const f = fx < -0.02 ? `Reverb ${Math.round(-fx * 100)}%` : fx > 0.02 ? `Delay ${Math.round(fx * 100)}%` : 'Dry';
-  hud.textContent = `${label} · Vol ${Math.round(vol * 100)}% · ${f}`;
-  hud.classList.add('show');
-}
+const fxText = (fx) => fx < -0.02 ? `Reverb ${Math.round(-fx * 100)}%` : fx > 0.02 ? `Delay ${Math.round(fx * 100)}%` : 'Dry';
+const fmtSemis = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0') + ' st';
+function showHud(text) { hud.textContent = text; hud.classList.add('show'); }
 
-function xyGesture(el, { getTarget, onTap, onDragStart, label }) {
+const VOL_AXIS = { key: 'vol', min: 0, max: 1, snap: 0, fmt: (v) => `Vol ${Math.round(v * 100)}%` };
+// ~12px per semitone on a phone: full ±12 sweep takes a long drag, so small notes are easy.
+const PITCH_AXIS = { key: 'pitch', min: -12, max: 12, snap: 1, span: 1.5, fmt: fmtSemis };
+
+function xyGesture(el, { getTarget, onTap, onDragStart, onAudition, label, y: Y }) {
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     el.setPointerCapture(e.pointerId);
@@ -59,15 +62,19 @@ function xyGesture(el, { getTarget, onTap, onDragStart, label }) {
         dragging = true;
         onDragStart?.();
         target = getTarget();
-        v0 = target.vol; f0 = target.fx;
+        v0 = target[Y.key] ?? 0; f0 = target.fx;
       }
       if (!dragging) return;
       const range = Math.min(innerWidth, 400) * 0.5;
-      target.vol = clamp(v0 - dy / range, 0, 1);
+      let v = clamp(v0 - (dy / (range * (Y.span || 1))) * (Y.max - Y.min), Y.min, Y.max);
+      if (Y.snap) v = Math.round(v / Y.snap) * Y.snap;
+      const changed = v !== target[Y.key];
+      target[Y.key] = v;
       let fx = clamp(f0 + dx / range, -1, 1);
       if (Math.abs(fx) < 0.06) fx = 0; // detent at dry
       target.fx = fx;
-      showHud(target.vol, target.fx, label());
+      showHud(`${label()} · ${Y.fmt(v)} · ${fxText(fx)}`);
+      if (changed && Y.snap && !clock.running) onAudition?.(); // hear each new note
       render();
     };
     const up = () => {
@@ -95,6 +102,7 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
   $tracks.append(slot);
   xyGesture(el, {
     label: () => `Track ${t + 1}`,
+    y: VOL_AXIS,
     getTarget: () => S.tracks[t],
     onDragStart: () => { S.sel = t; },
     onTap: () => { S.sel = t; trigger(t); persist(); render(); },
@@ -108,7 +116,9 @@ const padEls = Array.from({ length: STEPS }, (_, s) => {
   $pads.append(el);
   xyGesture(el, {
     label: () => `Step ${s + 1}`,
+    y: PITCH_AXIS,
     getTarget: () => S.tracks[S.sel].steps[s],
+    onAudition: () => trigger(S.sel, 0, S.tracks[S.sel].steps[s]),
     onDragStart: () => { S.tracks[S.sel].steps[s].on = true; },
     onTap: () => {
       const st = S.tracks[S.sel].steps[s];
@@ -209,9 +219,8 @@ function drawWave() {
       g.fillRect(x - bw * 0.18, (wh - bh) / 2, Math.max(1.5 * dpr, bw * 0.36), bh);
     }
     // playhead
-    if (playhead && playhead.t === S.sel) {
-      const len = (tr.end - tr.start) * buf.duration;
-      const k = (ctx.currentTime - playhead.at) / len;
+    if (playhead && playhead.t === S.sel && playhead.len) {
+      const k = (ctx.currentTime - playhead.at) / playhead.len;
       if (k >= 0 && k <= 1) {
         g.fillStyle = '#fff';
         g.fillRect(x0 + (x1 - x0) * k - dpr, 0, 2 * dpr, wh);
@@ -272,7 +281,8 @@ function render() {
     const st = tr.steps[s];
     el.classList.toggle('on', st.on);
     el.classList.toggle('now', s === curStep);
-    setSquare(el, st.vol, st.fx);
+    setSquare(el, ((st.pitch || 0) + 12) / 24, st.fx);
+    el.dataset.pitch = st.pitch ? fmtSemis(st.pitch).replace(' st', '') : '';
   });
   $('sname').textContent = tr.sample.replace(/\.wav$/, '');
   $('bpm').textContent = `${S.bpm} bpm`;

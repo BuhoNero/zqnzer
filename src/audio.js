@@ -64,17 +64,22 @@ const lastVoice = [];
 /**
  * Play a buffer.
  * @param {AudioBuffer} buf
- * @param {{track:number, start:number, end:number, vol:number, fx:number}} p
- *   start/end in 0..1 of the buffer, vol 0..1, fx -1 (reverb) .. 0 (dry) .. +1 (delay)
+ * @param {{track:number, start:number, end:number, vol:number, fx:number, pitch?:number}} p
+ *   start/end in 0..1 of the buffer, vol 0..1, fx -1 (reverb) .. 0 (dry) .. +1 (delay),
+ *   pitch in semitones (repitches like a sampler: higher = shorter)
+ * @returns real playback length in seconds
  */
 export function play(buf, p, when = 0) {
-  if (!buf) return;
+  if (!buf) return 0;
   when = Math.max(when, ctx.currentTime);
+  const rate = Math.pow(2, (p.pitch || 0) / 12);
   const off = p.start * buf.duration;
-  const len = Math.max(0.005, (p.end - p.start) * buf.duration);
+  const bufLen = Math.max(0.005, (p.end - p.start) * buf.duration);
+  const len = bufLen / rate; // wall-clock length
 
   const src = ctx.createBufferSource();
   src.buffer = buf;
+  src.playbackRate.value = rate;
   const amp = ctx.createGain();
   const v = p.vol * p.vol; // perceptual curve
   amp.gain.setValueAtTime(0, when);
@@ -97,7 +102,9 @@ export function play(buf, p, when = 0) {
   }
   lastVoice[p.track] = amp;
 
-  src.start(when, off, len + 0.01);
+  src.start(when, off, bufLen); // duration is in buffer time
+  src.stop(when + len + 0.01);
+  return len;
 }
 
 /** Lookahead scheduler. onStep(step, time) is called ahead of time for every 16th. */

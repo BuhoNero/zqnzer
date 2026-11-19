@@ -5,7 +5,7 @@ export const STEPS = 16;
 export const TRACKS = 4;
 const DEFAULT_SAMPLES = ['kick.wav', 'snare.wav', 'hat-closed.wav', 'bass-c.wav'];
 
-const newStep = () => ({ on: false, vol: 1, fx: 0 });
+const newStep = () => ({ on: false, pitch: 0, fx: 0 });
 const newTrack = (sample) => ({
   sample, vol: 0.8, fx: 0, start: 0, end: 1,
   steps: Array.from({ length: STEPS }, newStep),
@@ -17,7 +17,8 @@ function demo() {
   on(0, 0, 6, 10);
   on(1, 4, 12);
   on(2, 0, 2, 4, 6, 8, 10, 12, 14);
-  on(3, 0, 3, 11);
+  on(3, 0, 3, 8, 11, 14);
+  [0, 0, 0, 3, 0, 0, 0, 0, 7, 0, 0, 5, 0, 0, -2, 0].forEach((p, i) => (s.tracks[3].steps[i].pitch = p));
   s.tracks[2].vol = 0.55;
   s.tracks[1].steps[12].fx = -0.5;
   return s;
