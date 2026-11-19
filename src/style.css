@@ -5,6 +5,7 @@
   --pad: #fff;
   --accent: #10a89a;
   --pat: #ff1fc8;
+  --well: #262626; /* selected tab + pad panel */
   --gap: clamp(8px, 3.5vw, 18px);
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -33,40 +34,92 @@ button { font: inherit; color: inherit; touch-action: none; }
 /* tracks + pads with the selected track tab merging into the pad panel */
 #tracks, #pads { display: grid; grid-template-columns: repeat(4, 1fr); }
 #tracks { column-gap: 0; }
-.slot { padding: calc(var(--gap) * .6); padding-bottom: var(--gap); border-radius: 14px 14px 0 0; }
-.slot.sel { background: var(--panel); }
-#pads { gap: var(--gap); background: var(--panel); padding: calc(var(--gap) * .8); border-radius: 14px; }
+.slot { padding: calc(var(--gap) * .6 - 2px); padding-bottom: var(--gap); border-radius: 14px 14px 0 0;
+  border: 2px solid transparent; border-bottom: 0; }
+/* selected tab and pad panel read as one dark shape outlined in the track colour (pink in pattern mode);
+   the tab hangs 2px over the panel's top border to open the seam */
+.slot.sel { background: var(--well); border-color: var(--edge, var(--c)); position: relative; z-index: 1;
+  margin-bottom: -2px; }
+#pads { gap: var(--gap); background: var(--well); padding: calc(var(--gap) * .8 - 2px); border-radius: 14px;
+  border: 2px solid var(--edge, var(--c)); }
+html[data-mode="pattern"] .slot.sel, html[data-mode="pattern"] #pads { --edge: var(--pat); }
+/* concave fillets where the tab meets the panel: a quarter ring of the outline colour,
+   transparent inside the curve, panel colour outside (covering the straight seam) */
+.slot.sel { --r: 10px; }
+.slot.sel::before, .slot.sel::after { content: ""; position: absolute; bottom: 0; pointer-events: none;
+  width: calc(var(--r) + 2px); height: calc(var(--r) + 2px); }
+.slot.sel::before { left: calc(-2px - var(--r));
+  background: radial-gradient(circle at 0 0, transparent calc(var(--r) - .5px), var(--edge, var(--c)) var(--r),
+    var(--edge, var(--c)) calc(var(--r) + 1.5px), var(--well) calc(var(--r) + 2px)); }
+.slot.sel::after { right: calc(-2px - var(--r));
+  background: radial-gradient(circle at 100% 0, transparent calc(var(--r) - .5px), var(--edge, var(--c)) var(--r),
+    var(--edge, var(--c)) calc(var(--r) + 1.5px), var(--well) calc(var(--r) + 2px)); }
+.slot.sel:first-child::before, .slot.sel:last-child::after { display: none; } /* flush with the panel edge */
 #pads[data-sel="0"] { border-top-left-radius: 0; }
 #pads[data-sel="3"] { border-top-right-radius: 0; }
 
 .btn { aspect-ratio: 1; width: 100%; border: 0; border-radius: 14%; position: relative; padding: 0;
-  transition: background-color .06s; }
+  /* --sh: bevel/depth, --glow: light spill when lit, --ring: playhead */
+  --sh: inset 0 1px 0 #ffffff1f, inset 0 -3px 4px #0006, 0 2px 0 #000c;
+  box-shadow: var(--sh), var(--glow, 0 0 #0000), var(--ring, 0 0 #0000);
+  transition: transform .08s, box-shadow .08s, opacity .15s, filter .08s; }
+/* pressed: sinks into the panel like a hardware key */
+.btn.down { transform: translateY(2px) scale(.97);
+  --sh: inset 0 1px 0 #ffffff14, inset 0 -1px 2px #0006, 0 0 0 #000c; }
 .track { background: var(--track); }
-.pad { background: var(--pad); }
-.pad.on { background: var(--accent); }
-.pad.now { box-shadow: 0 0 0 3px #fff, 0 0 0 6px #000; }
-.pad.on.now { background: #19d2c0; }
+
+/* backlit silicone pads: unlit = dim frosted tint of the track colour, lit = glowing centre + light spill */
+.pad { --lit: var(--c, var(--accent)); border-radius: 12%;
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--lit) 16%, #4a4a4a),
+    color-mix(in srgb, var(--lit) 8%, #303030) 80%); }
+.pad.on, .pad.filled, .pad.cur {
+  background: radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--lit) 30%, #fff) 0%, var(--lit) 42%,
+    color-mix(in srgb, var(--lit) 72%, #000) 100%);
+  --glow: 0 0 16px -3px color-mix(in srgb, var(--lit) 75%, transparent); }
+.pad.now { --ring: inset 0 0 0 2px #ffffffd9; }
+.pad.on.now { filter: brightness(1.18); }
+#pads.muted .pad.on { opacity: .4; }
+/* sound name, in the track colour */
+.tname { position: absolute; left: 9%; right: 9%; top: 7%; font-size: clamp(8px, 2.4vw, 11px); font-weight: 600;
+  color: var(--c); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  letter-spacing: .02em; pointer-events: none; }
+.track.muted .tname { text-decoration: line-through; opacity: .5; }
+.track.muted .scope, .track.muted::after { opacity: .25; }
+.track.muted { background: #1a1a1a; }
 /* the dot is the value indicator: x = reverb ← dry → delay, y = volume (tracks) / pitch (pads) */
 .btn::after { content: ""; position: absolute; width: 20%; height: 20%; border-radius: 50%;
   left: calc(8% + var(--x, .5) * 66%); top: calc(8% + (1 - var(--y, .8)) * 66%);
   pointer-events: none; }
 .pad::before { content: attr(data-label); position: absolute; left: 10%; bottom: 8%;
-  font-size: clamp(10px, 3vw, 14px); font-weight: 600; color: #0009; pointer-events: none; }
-.track::after { background: #fff; }
+  font-size: clamp(10px, 3vw, 14px); font-weight: 600; color: #fff8; pointer-events: none; }
+.pad.on::before { color: #000a; }
+.track::after { background: #fff; width: 16%; height: 16%;
+  top: calc(21% + (1 - var(--y, .8)) * 63%); } /* stays below the sound name */
 .scope { position: absolute; left: 8%; right: 8%; bottom: 8%; height: 42%; width: 84%;
   pointer-events: none; }
-.pad::after { background: #000; }
+.pad::after { background: #ffffff6b; }
+.pad.on::after { background: #000b; }
 
 /* ---------- pattern mode ---------- */
-html[data-mode="pattern"] .btn::after { display: none; }
+html[data-mode="pattern"] .btn::after,
+html[data-mode="pattern"] .tname { display: none; }
 html[data-mode="pattern"] .track::before { content: attr(data-label); position: absolute; inset: 0 0 42% 0;
   display: grid; place-items: center; font-size: clamp(18px, 6vw, 28px); font-weight: 700; color: #fff; }
 html[data-mode="pattern"] .track.has-cur::before { color: var(--pat); }
 html[data-mode="pattern"] .pad::before { left: 0; right: 0; bottom: auto; top: 50%; transform: translateY(-50%);
-  text-align: center; font-size: clamp(13px, 4vw, 18px); color: #0006; }
-.pad.filled { background: #bfe9e4; }
-.pad.cur { background: var(--pat); }
-.pad.cur::before { color: #fff !important; }
+  text-align: center; font-size: clamp(13px, 4vw, 18px); color: #fff5; }
+/* empty patterns stay unlit (neutral grey); used ones glow white; the current one glows pink */
+html[data-mode="pattern"] .pad { --lit: #8a8a8a; }
+html[data-mode="pattern"] .pad.filled { --lit: #fff; }
+.pad.filled::before { color: #000b !important; }
+html[data-mode="pattern"] .pad.cur { --lit: var(--pat); }
+.pad.cur::before { color: #fff !important; text-shadow: 0 1px 2px #0005; }
+html[data-mode="pattern"] .pad.filled::after,
+html[data-mode="pattern"] .pad.cur::after { display: block; content: ""; left: 16%; right: 16%; width: auto; top: auto;
+  bottom: 14%; height: 7%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--u0) 0 23%, transparent 23% 25.6%, var(--u1) 25.6% 48.6%,
+    transparent 48.6% 51.4%, var(--u2) 51.4% 74.4%, transparent 74.4% 77%, var(--u3) 77% 100%) #0000000f; }
+html[data-mode="pattern"] .pad.cur::after { filter: brightness(1.1); box-shadow: 0 0 0 1.5px #fff6; }
 .pad.src { outline: 4px dashed var(--pat); outline-offset: -4px; animation: lift .8s ease-in-out infinite alternate; }
 @keyframes lift { to { transform: scale(.92); } }
 
@@ -76,6 +129,7 @@ html[data-mode="pattern"] .pad::before { left: 0; right: 0; bottom: auto; top: 5
 footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 footer button { border: 0; background: #0003; border-radius: 12px; height: 52px; padding: 0 16px;
   touch-action: manipulation; }
+footer button:active { filter: brightness(.85); }
 #play { font-size: 24px; width: 64px; height: 64px; border-radius: 50%; background: #eee; color: #222; }
 #tempo { display: flex; align-items: center; gap: 4px; margin: 0 auto; }
 #tempo button { width: 38px; font-size: 22px; padding: 0; }

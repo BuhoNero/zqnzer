@@ -13,6 +13,11 @@ const row = (t) => pattern(S).steps[t]; // steps of track t in the current patte
 const snd = (t) => pattern(S).sounds[t]; // sound (sample + trim) of track t in the current pattern
 const buf = (t) => decoded.get(snd(t).sample);
 
+// Track identity colours (kick, snare, hats, bass by default). Pattern mode stays pink.
+const COL = ['#ff6b45', '#ffb829', '#14b8a6', '#4f8dff'];
+const PINK = '#ff1fc8';
+const buzz = (ms) => { try { navigator.vibrate?.(ms); } catch {} };
+
 // UI mode: 'steps' (edit) or 'pattern' (choose pattern; track buttons = banks A–D)
 let mode = 'steps';
 let viewBank = Math.floor(S.pat / STEPS);
@@ -45,7 +50,7 @@ function trigger(t, when, step) {
 // ---------- clock ----------
 const visualQueue = [];
 const clock = createClock(() => S.bpm, (step, time) => {
-  pattern(S).steps.forEach((r, t) => { const st = r[step]; if (st.on) trigger(t, time, st); });
+  pattern(S).steps.forEach((r, t) => { const st = r[step]; if (st.on && !S.tracks[t].mute) trigger(t, time, st); });
   visualQueue.push({ step, time });
 });
 
@@ -76,6 +81,7 @@ function choosePattern(i) {
   // immediate: playback keeps its position in the bar and continues with the new pattern
   pattern(S, i); // a new pattern inherits the current pattern's sounds
   S.pat = i;
+  buzz(10);
   persist();
   render();
 }
@@ -95,10 +101,11 @@ function xyGesture(el, { getTarget, onTap, onDragStart, onAudition, onLongPress,
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     try { el.setPointerCapture(e.pointerId); } catch {}
+    el.classList.add('down');
     const x0 = e.clientX, y0 = e.clientY;
     let dragging = false, longPressed = false, target, v0, f0;
     const lp = onLongPress && setTimeout(() => {
-      if (onLongPress()) { longPressed = true; navigator.vibrate?.(25); }
+      if (onLongPress()) { longPressed = true; buzz(25); }
     }, 450);
     const move = (e) => {
       const dx = e.clientX - x0, dy = e.clientY - y0;
@@ -128,6 +135,7 @@ function xyGesture(el, { getTarget, onTap, onDragStart, onAudition, onLongPress,
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       clearTimeout(lp);
+      el.classList.remove('down');
       if (!copySrcActive()) hud.classList.remove('show');
       if (dragging) persist(); else if (!longPressed) onTap();
     };
@@ -147,7 +155,10 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
   el.className = 'btn track';
   const scope = document.createElement('canvas');
   scope.className = 'scope';
-  el.append(scope);
+  const name = document.createElement('span');
+  name.className = 'tname';
+  el.append(scope, name);
+  slot.style.setProperty('--c', COL[t]);
   slot.append(el);
   $tracks.append(slot);
   xyGesture(el, {
@@ -155,7 +166,17 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
     y: VOL_AXIS,
     getTarget: () => S.tracks[t],
     onDragStart: () => { S.sel = t; },
+    onLongPress: () => {
+      if (mode === 'pattern') return false;
+      const tr = S.tracks[t];
+      tr.mute = !tr.mute;
+      showHud(`Track ${t + 1} ${tr.mute ? 'muted' : 'on'}`);
+      setTimeout(() => hud.classList.remove('show'), 900);
+      persist(); render();
+      return true;
+    },
     onTap: () => {
+      buzz(8);
       if (mode === 'pattern') { viewBank = t; render(); return; }
       S.sel = t; persist(); render(); // select only, no audition
     },
@@ -185,6 +206,7 @@ const padEls = Array.from({ length: STEPS }, (_, s) => {
       }
       const st = row(S.sel)[s];
       st.on = !st.on;
+      buzz(st.on ? 10 : 5);
       if (st.on && !clock.running) trigger(S.sel, 0, st);
       persist(); render();
     },
@@ -243,8 +265,16 @@ $('patbtn').onclick = () => {
   mode = mode === 'pattern' ? 'steps' : 'pattern';
   if (copySrc !== null) { copySrc = null; hud.classList.remove('show'); }
   viewBank = Math.floor(S.pat / STEPS);
+  buzz(12);
   render();
+  ripple();
 };
+// pads cascade in from the top-left when the grid changes meaning
+function ripple() {
+  padEls.forEach((el, s) => el.animate(
+    [{ transform: 'scale(.82)', opacity: 0.3 }, { transform: 'scale(1)', opacity: 1 }],
+    { duration: 220, delay: ((s % 4) + Math.floor(s / 4)) * 22, easing: 'cubic-bezier(.2,.9,.3,1.3)', fill: 'backwards' }));
+}
 
 // ---------- waveform + trim ----------
 const canvas = document.querySelector('#wave canvas');
@@ -282,14 +312,14 @@ function drawWave() {
   const x0 = tr.start * W, x1 = tr.end * W;
   g.save();
   g.beginPath(); g.roundRect(0, 0, W, wh, r); g.clip();
-  g.fillStyle = '#0b7268';
+  g.fillStyle = COL[S.sel] + '8c';
   g.fillRect(x0, 0, x1 - x0, wh);
   if (b) {
     const p = peaks(b), pad = W * 0.04, bw = (W - pad * 2) / BARS;
     for (let i = 0; i < BARS; i++) {
       const x = pad + i * bw + bw / 2, inside = x >= x0 && x <= x1;
       const bh = Math.max(3 * dpr, p[i] * wh * 0.75);
-      g.fillStyle = inside ? '#8ff5e6' : '#fff';
+      g.fillStyle = inside ? '#fff' : '#ffffff4d';
       g.fillRect(x - bw * 0.18, (wh - bh) / 2, Math.max(1.5 * dpr, bw * 0.36), bh);
     }
     // playhead
@@ -353,15 +383,23 @@ function render() {
     el.parentElement.classList.toggle('sel', t === tab);
     el.dataset.label = 'ABCD'[t];
     el.classList.toggle('has-cur', pm && Math.floor(S.pat / STEPS) === t);
+    el.classList.toggle('muted', !!S.tracks[t].mute);
+    el.lastChild.textContent = snd(t).sample.replace(/\.wav$/, '');
     setSquare(el, S.tracks[t].vol, S.tracks[t].fx);
   });
   const r = row(S.sel);
+  $pads.style.setProperty('--c', COL[S.sel]);
+  $pads.classList.toggle('muted', !pm && !!S.tracks[S.sel].mute);
   padEls.forEach((el, s) => {
     if (pm) {
       const i = viewBank * STEPS + s;
       el.className = 'btn pad' + (i === S.pat ? ' cur' : '')
         + (isEmpty(S.patterns[i]) ? '' : ' filled') + (i === copySrc ? ' src' : '');
       el.dataset.label = patName(i);
+      // which tracks this pattern uses → coloured segments of the mini bar
+      const ps = S.patterns[i];
+      COL.forEach((c, t) => el.style.setProperty(`--u${t}`,
+        ps && ps.steps[t].some((st) => st.on) ? c : 'transparent'));
       return;
     }
     const st = r[s];
@@ -383,10 +421,26 @@ function frame() {
     const v = visualQueue.shift();
     curStep = v.step;
     if (mode === 'steps') padEls.forEach((el, s) => el.classList.toggle('now', s === curStep));
+    hits(v.step);
   }
   drawWave();
   drawScopes();
   requestAnimationFrame(frame);
+}
+
+// one-shot flashes: track buttons glow on their hits, the playing pad pops, play pulses on beats
+function hits(step) {
+  const steps = pattern(S).steps;
+  trackEls.forEach((el, t) => {
+    if (!steps[t][step].on || S.tracks[t].mute) return;
+    const c = mode === 'pattern' ? PINK : COL[t];
+    el.animate([{ boxShadow: `0 0 0 3px ${c}, 0 0 14px ${c}` }, { boxShadow: `0 0 0 0 ${c}00, 0 0 0 ${c}00` }],
+      { duration: 260, easing: 'ease-out' });
+    if (mode === 'steps' && t === S.sel)
+      padEls[step].animate([{ transform: 'scale(1.07)' }, { transform: 'scale(1)' }], { duration: 160, easing: 'ease-out' });
+  });
+  if (step % 4 === 0)
+    $play.animate([{ transform: `scale(${step ? 1.05 : 1.1})` }, { transform: 'scale(1)' }], { duration: 180, easing: 'ease-out' });
 }
 
 // ---------- per-track mini scopes ----------
@@ -395,7 +449,7 @@ const scopeIdle = [];
 let scopeMode = '';
 function drawScopes() {
   if (scopeMode !== mode) { scopeMode = mode; scopeIdle.length = 0; } // recolour on mode change
-  const live = mode === 'pattern' ? '#ff7ae0' : '#8ff5e6';
+  const pm = mode === 'pattern';
   trackEls.forEach((el, t) => {
     const c = el.firstChild, g2 = c.getContext('2d');
     const dpr = devicePixelRatio, W = c.clientWidth * dpr, H = c.clientHeight * dpr;
@@ -410,7 +464,7 @@ function drawScopes() {
     g2.clearRect(0, 0, W, H);
     g2.lineWidth = 2 * dpr;
     g2.lineJoin = 'round';
-    g2.strokeStyle = silent ? '#ffffff40' : live;
+    g2.strokeStyle = silent ? '#ffffff40' : pm ? '#ff7ae0' : COL[t];
     g2.beginPath();
     const n = 96, stride = scopeData.length / n, mid = H / 2;
     for (let i = 0; i < n; i++) {
