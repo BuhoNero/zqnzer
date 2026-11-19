@@ -1,6 +1,7 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
-import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js?v=202611192207';
-import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192207';
+import { ctx, loadSample, decode, play, createClock, setTempo, meters } from './audio.js?v=202611192213';
+import { MAX_SEC, isUser, userSamples, userWav, userName, loadLibrary, addSample, prepare, embed, unembed } from './usersamples.js?v=202611192213';
+import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192213';
 
 const S = load();
 const decoded = new Map(); // sample name -> AudioBuffer (all preloaded so switching is instant)
@@ -25,10 +26,13 @@ let viewBank = Math.floor(S.pat / STEPS);
 // ---------- samples ----------
 async function ensure(name) {
   if (!decoded.has(name)) {
-    try { decoded.set(name, await loadSample(name)); } catch { console.warn('missing sample', name); }
+    try { decoded.set(name, await (isUser(name) ? decode(userWav(name)) : loadSample(name))); }
+    catch { console.warn('missing sample', name); }
   }
   return decoded.get(name);
 }
+const label = (name) => (isUser(name) ? userName(name) : name.replace(/\.wav$/, ''));
+const allSamples = () => [...sampleList, ...userSamples()];
 async function setSample(t, name) {
   const sd = snd(t);
   Object.assign(sd, { sample: name, start: 0, end: 1 });
@@ -218,8 +222,9 @@ const padEls = Array.from({ length: STEPS }, (_, s) => {
 
 // sample picker
 function cycleSample(dir) {
-  const i = sampleList.indexOf(snd(S.sel).sample);
-  const name = sampleList[(i + dir + sampleList.length) % sampleList.length];
+  const list = allSamples();
+  const i = list.indexOf(snd(S.sel).sample);
+  const name = list[(i + dir + list.length) % list.length];
   setSample(S.sel, name).then(() => trigger(S.sel));
 }
 $('prev').onclick = () => cycleSample(-1);
@@ -232,7 +237,9 @@ function openSheet(items, title) {
   if (title) { const h = document.createElement('li'); h.className = 'title'; h.textContent = title; ul.append(h); }
   for (const it of items) {
     const li = document.createElement('li');
-    li.textContent = it.label;
+    li.textContent = it.label ?? it.section;
+    if (it.section) { li.className = 'title'; ul.append(li); continue; }
+    if (it.cls) li.classList.add(it.cls);
     if (it.hint) { const h = document.createElement('small'); h.textContent = it.hint; li.append(h); }
     li.classList.toggle('cur', !!it.cur);
     li.onclick = (e) => { e.stopPropagation(); sheet.hidden = true; it.action(); };
@@ -241,18 +248,109 @@ function openSheet(items, title) {
   sheet.hidden = false;
 }
 sheet.onclick = () => (sheet.hidden = true);
-$('sname').onclick = () => openSheet(sampleList.map((name) => ({
-  label: name.replace(/\.wav$/, ''),
+const sampleItem = (name) => ({
+  label: label(name),
   cur: name === snd(S.sel).sample,
   action: () => setSample(S.sel, name).then(() => trigger(S.sel)),
-})));
+});
+$('sname').onclick = () => {
+  const mine = userSamples();
+  openSheet([
+    { label: '● Record a sample', hint: `up to ${MAX_SEC} s · goes on track ${S.sel + 1}`, cls: 'act', action: openRecorder },
+    { label: 'Import audio file…', hint: `first ${MAX_SEC} s · goes on track ${S.sel + 1}`, cls: 'act', action: () => audioIn.click() },
+    ...(mine.length ? [{ section: 'My samples' }, ...mine.map(sampleItem)] : []),
+    { section: 'Kit' }, ...sampleList.map(sampleItem),
+  ]);
+};
+
+// ---------- your own samples: import a file or record from the mic ----------
+async function addUserSample(name, audioBuf) {
+  const d = prepare(audioBuf);
+  if (!d) { flash('Nothing to hear in that: too quiet'); return false; }
+  const key = await addSample(name, d, audioBuf.sampleRate);
+  await setSample(S.sel, key);
+  trigger(S.sel);
+  flash(`${name} → track ${S.sel + 1}`);
+  return true;
+}
+const audioIn = Object.assign(document.createElement('input'), { type: 'file', accept: 'audio/*' });
+audioIn.onchange = async () => {
+  const f = audioIn.files[0];
+  audioIn.value = '';
+  if (!f) return;
+  let b;
+  try { b = await ctx.decodeAudioData(await f.arrayBuffer()); }
+  catch { return flash('Could not read that audio file'); }
+  addUserSample(f.name.replace(/\.[^.]+$/, '').slice(0, 24), b);
+};
+
+const $rec = $('rec'), $recbtn = $('recbtn'), $reclevel = $('reclevel'), $recprog = $('recprog');
+let rec = null; // { mr, stream, src, an, t0, chunks, cancel }
+function recUI(state) {
+  $rec.dataset.state = state;
+  $recbtn.textContent = state === 'rec' ? '■' : state === 'busy' ? '…' : '●';
+  $('rechint').textContent = state === 'rec' ? 'tap to stop' : state === 'busy' ? 'processing…' : `tap to record · up to ${MAX_SEC} s`;
+  if (state !== 'rec') { $reclevel.style.width = '0'; $recprog.style.width = '0'; }
+}
+function openRecorder() {
+  $('rectitle').textContent = `Record → track ${S.sel + 1}`;
+  $rec.hidden = false;
+  recUI('idle');
+}
+function closeRecorder() {
+  if (rec) { rec.cancel = true; stopRec(); }
+  $rec.hidden = true;
+}
+async function startRec() {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  } catch { flash('Microphone not available'); return; }
+  const mr = new MediaRecorder(stream), chunks = [];
+  const src = ctx.createMediaStreamSource(stream), an = ctx.createAnalyser(), mute = ctx.createGain();
+  an.fftSize = 1024; mute.gain.value = 0;
+  src.connect(an).connect(mute).connect(ctx.destination); // pulled for metering only, never heard
+  rec = { mr, stream, src, an, chunks, t0: performance.now(), cancel: false };
+  mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  mr.onstop = finishRec;
+  mr.start();
+  recUI('rec');
+  buzz(15);
+  const lv = new Float32Array(1024), limit = (MAX_SEC + 1) * 1000; // +1 s: leading silence is trimmed
+  (function meter() {
+    if (!rec || rec.mr !== mr) return;
+    an.getFloatTimeDomainData(lv);
+    let pk = 0; for (const x of lv) pk = Math.max(pk, Math.abs(x));
+    const el = performance.now() - rec.t0;
+    $reclevel.style.width = `${Math.min(100, pk * 140)}%`;
+    $recprog.style.width = `${Math.min(100, (el / limit) * 100)}%`;
+    if (el >= limit) return stopRec();
+    requestAnimationFrame(meter);
+  })();
+}
+function stopRec() { if (rec?.mr.state === 'recording') rec.mr.stop(); }
+async function finishRec() {
+  const r = rec; rec = null;
+  r.stream.getTracks().forEach((t) => t.stop());
+  r.src.disconnect();
+  if (r.cancel) return;
+  recUI('busy');
+  try {
+    const b = await ctx.decodeAudioData(await new Blob(r.chunks).arrayBuffer());
+    const n = userSamples().filter((k) => /^rec \d+$/.test(userName(k))).length + 1;
+    if (await addUserSample(`rec ${n}`, b)) $rec.hidden = true; else recUI('idle');
+  } catch { flash('Could not read the recording'); recUI('idle'); }
+}
+$recbtn.onclick = () => (rec ? stopRec() : $rec.dataset.state === 'idle' && startRec());
+$('reccancel').onclick = closeRecorder;
 
 // ---------- options: project export / import ----------
 const stampName = () => {
   const d = new Date(), p = (n) => String(n).padStart(2, '0');
   return `zqnzer-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
 };
-const projectFile = () => new File([JSON.stringify(toFile(S))], stampName(), { type: 'application/json' });
+const projectFile = () => new File([JSON.stringify({ ...toFile(S), samples: embed(S) })], stampName(), { type: 'application/json' });
 const usedPatterns = () => S.patterns.filter((p) => !isEmpty(p)).length;
 function flash(text, ms = 1600) { showHud(text); setTimeout(() => hud.classList.remove('show'), ms); }
 
@@ -272,13 +370,14 @@ fileIn.onchange = async () => {
   const f = fileIn.files[0];
   fileIn.value = '';
   if (!f) return;
-  let song;
-  try { song = fromFile(JSON.parse(await f.text())); }
+  let song, raw;
+  try { raw = JSON.parse(await f.text()); song = fromFile(raw); }
   catch { return flash('That file is not a Zqnzer project'); }
   const n = song.patterns.filter((p) => !isEmpty(p)).length;
   if (!confirm(`Replace the current project with "${f.name}" (${n} pattern${n === 1 ? '' : 's'})?
 Export first if you want to keep the current one.`)) return;
   if (clock.running) $play.onclick();
+  await unembed(raw.samples); // recorded/imported samples travel inside the project file
   for (const k of Object.keys(S)) delete S[k];
   Object.assign(S, song);
   mode = 'steps'; copySrc = null; viewBank = Math.floor(S.pat / STEPS);
@@ -444,7 +543,7 @@ function render() {
     el.dataset.label = 'ABCD'[t];
     el.classList.toggle('has-cur', pm && Math.floor(S.pat / STEPS) === t);
     el.classList.toggle('muted', !!snd(t).mute);
-    el.lastChild.textContent = snd(t).sample.replace(/\.wav$/, '');
+    el.lastChild.textContent = label(snd(t).sample);
     setSquare(el, snd(t).vol, snd(t).fx);
   });
   const r = row(S.sel);
@@ -470,7 +569,7 @@ function render() {
   const pb = $('patbtn');
   pb.textContent = patName(S.pat);
   pb.classList.toggle('active', pm);
-  $('sname').textContent = snd(S.sel).sample.replace(/\.wav$/, '');
+  $('sname').textContent = label(snd(S.sel).sample);
   $('bpm').innerHTML = `<b>${S.bpm}</b><small>BPM</small>`;
   $play.textContent = clock.running ? '■︎' : '▶︎'; // text glyphs, not emoji
   $play.classList.toggle('on', clock.running);
@@ -548,7 +647,7 @@ $('build').textContent = `build ${document.lastModified}`;
 
 setTempo(S.bpm);
 render();
-fetch('assets/samples/index.json').then((r) => r.json()).then((l) => {
+Promise.all([fetch('assets/samples/index.json').then((r) => r.json()), loadLibrary()]).then(([l]) => {
   sampleList = l;
   const used = S.patterns.flatMap((p) => p?.sounds.map((x) => x.sample) ?? []);
   return Promise.all([...new Set([...l, ...used])].map(ensure));

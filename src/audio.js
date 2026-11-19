@@ -46,6 +46,9 @@ function makeImpulse(sec, decay) {
   return b;
 }
 
+/** Decode raw audio bytes (copies the buffer: decodeAudioData detaches it). */
+export const decode = (ab) => ctx.decodeAudioData(ab.slice(0));
+
 const cache = new Map();
 export function loadSample(name) {
   if (!cache.has(name)) {

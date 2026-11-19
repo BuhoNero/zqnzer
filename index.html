@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#323232">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Zqnzer</title>
-  <link rel="stylesheet" href="src/style.css?v=202611192207">
+  <link rel="stylesheet" href="src/style.css?v=202611192213">
 </head>
 <body>
   <main id="app">
@@ -35,7 +35,17 @@
   </main>
   <div id="hud"></div>
   <div id="sheet" hidden><ul></ul></div>
+  <div id="rec" hidden>
+    <div class="box">
+      <div id="rectitle">Record</div>
+      <div class="meter"><i id="reclevel"></i></div>
+      <button id="recbtn" aria-label="Record">●</button>
+      <div class="meter time"><i id="recprog"></i></div>
+      <div id="rechint"></div>
+      <button id="reccancel">cancel</button>
+    </div>
+  </div>
   <div id="unlock">tap to start</div>
-  <script type="module" src="src/main.js?v=202611192207"></script>
+  <script type="module" src="src/main.js?v=202611192213"></script>
 </body>
 </html>
