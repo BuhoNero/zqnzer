@@ -1,30 +1,40 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
 import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js';
-import { STEPS, TRACKS, load, save, clearTrack } from './state.js';
+import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps } from './state.js';
 
 const S = load();
-const buffers = []; // per track
+const decoded = new Map(); // sample name -> AudioBuffer (all preloaded so switching is instant)
 let sampleList = [];
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const persist = () => save(S);
+const row = (t) => pattern(S).steps[t]; // steps of track t in the current pattern
+const snd = (t) => pattern(S).sounds[t]; // sound (sample + trim) of track t in the current pattern
+const buf = (t) => decoded.get(snd(t).sample);
+
+// UI mode: 'steps' (edit) or 'pattern' (choose pattern; track buttons = banks A–D)
+let mode = 'steps';
+let viewBank = Math.floor(S.pat / STEPS);
 
 // ---------- samples ----------
-async function setSample(t, name, resetTrim = true) {
-  const tr = S.tracks[t];
-  tr.sample = name;
-  if (resetTrim) { tr.start = 0; tr.end = 1; }
-  buffers[t] = await loadSample(name);
+async function ensure(name) {
+  if (!decoded.has(name)) decoded.set(name, await loadSample(name));
+  return decoded.get(name);
+}
+async function setSample(t, name) {
+  const sd = snd(t);
+  Object.assign(sd, { sample: name, start: 0, end: 1 });
+  await ensure(name);
   persist();
   render();
 }
 
 function trigger(t, when, step) {
-  const tr = S.tracks[t];
+  const tr = S.tracks[t], sd = snd(t);
   const st = step ?? { pitch: 0, fx: 0 };
-  const len = play(buffers[t], {
-    track: t, start: tr.start, end: tr.end,
+  const len = play(buf(t), {
+    track: t, start: sd.start, end: sd.end,
     vol: tr.vol,
     pitch: st.pitch || 0,
     fx: clamp(tr.fx + st.fx, -1, 1),
@@ -35,9 +45,40 @@ function trigger(t, when, step) {
 // ---------- clock ----------
 const visualQueue = [];
 const clock = createClock(() => S.bpm, (step, time) => {
-  S.tracks.forEach((tr, t) => { const st = tr.steps[step]; if (st.on) trigger(t, time, st); });
+  pattern(S).steps.forEach((r, t) => { const st = r[step]; if (st.on) trigger(t, time, st); });
   visualQueue.push({ step, time });
 });
+
+// Pattern copy: hold a pattern pad to pick it up, tap another pad to paste.
+let copySrc = null;
+const copySrcActive = () => copySrc !== null;
+function startCopy(i) {
+  copySrc = i;
+  showHud(`Copy ${patName(i)} → tap a pad`);
+  render();
+}
+function pasteTo(i) {
+  const src = copySrc;
+  copySrc = null;
+  if (i !== src) {
+    const replaced = !isEmpty(S.patterns[i]);
+    S.patterns[i] = structuredClone(pattern(S, src)); // steps + sounds
+    persist();
+    showHud(`${patName(src)} → ${patName(i)} ${replaced ? 'replaced' : 'copied'}`);
+    setTimeout(() => { if (!copySrcActive()) hud.classList.remove('show'); }, 1200);
+    return choosePattern(i); // go to the copy
+  }
+  hud.classList.remove('show');
+  render();
+}
+
+function choosePattern(i) {
+  // immediate: playback keeps its position in the bar and continues with the new pattern
+  pattern(S, i); // a new pattern inherits the current pattern's sounds
+  S.pat = i;
+  persist();
+  render();
+}
 
 // ---------- gestures ----------
 // Tap → onTap. Drag → XY control: x = reverb ← dry → delay, y = an axis (volume or pitch).
@@ -50,14 +91,19 @@ const VOL_AXIS = { key: 'vol', min: 0, max: 1, snap: 0, fmt: (v) => `Vol ${Math.
 // ~12px per semitone on a phone: full ±12 sweep takes a long drag, so small notes are easy.
 const PITCH_AXIS = { key: 'pitch', min: -12, max: 12, snap: 1, span: 1.5, fmt: fmtSemis };
 
-function xyGesture(el, { getTarget, onTap, onDragStart, onAudition, label, y: Y }) {
+function xyGesture(el, { getTarget, onTap, onDragStart, onAudition, onLongPress, label, y: Y }) {
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    el.setPointerCapture(e.pointerId);
+    try { el.setPointerCapture(e.pointerId); } catch {}
     const x0 = e.clientX, y0 = e.clientY;
-    let dragging = false, target, v0, f0;
+    let dragging = false, longPressed = false, target, v0, f0;
+    const lp = onLongPress && setTimeout(() => {
+      if (onLongPress()) { longPressed = true; navigator.vibrate?.(25); }
+    }, 450);
     const move = (e) => {
       const dx = e.clientX - x0, dy = e.clientY - y0;
+      if (Math.hypot(dx, dy) > 10) clearTimeout(lp);
+      if (mode === 'pattern' || longPressed) return; // pattern mode: taps only
       if (!dragging && Math.hypot(dx, dy) > 10) {
         dragging = true;
         onDragStart?.();
@@ -81,8 +127,9 @@ function xyGesture(el, { getTarget, onTap, onDragStart, onAudition, label, y: Y 
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
-      hud.classList.remove('show');
-      if (dragging) persist(); else onTap();
+      clearTimeout(lp);
+      if (!copySrcActive()) hud.classList.remove('show');
+      if (dragging) persist(); else if (!longPressed) onTap();
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -108,7 +155,10 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
     y: VOL_AXIS,
     getTarget: () => S.tracks[t],
     onDragStart: () => { S.sel = t; },
-    onTap: () => { S.sel = t; trigger(t); persist(); render(); },
+    onTap: () => {
+      if (mode === 'pattern') { viewBank = t; render(); return; }
+      S.sel = t; trigger(t); persist(); render();
+    },
   });
   return el;
 });
@@ -120,11 +170,20 @@ const padEls = Array.from({ length: STEPS }, (_, s) => {
   xyGesture(el, {
     label: () => `Step ${s + 1}`,
     y: PITCH_AXIS,
-    getTarget: () => S.tracks[S.sel].steps[s],
-    onAudition: () => trigger(S.sel, 0, S.tracks[S.sel].steps[s]),
-    onDragStart: () => { S.tracks[S.sel].steps[s].on = true; },
+    getTarget: () => row(S.sel)[s],
+    onAudition: () => trigger(S.sel, 0, row(S.sel)[s]),
+    onLongPress: () => {
+      if (mode !== 'pattern') return false;
+      startCopy(viewBank * STEPS + s);
+      return true;
+    },
+    onDragStart: () => { row(S.sel)[s].on = true; },
     onTap: () => {
-      const st = S.tracks[S.sel].steps[s];
+      if (mode === 'pattern') {
+        const i = viewBank * STEPS + s;
+        return copySrcActive() ? pasteTo(i) : choosePattern(i);
+      }
+      const st = row(S.sel)[s];
       st.on = !st.on;
       if (st.on && !clock.running) trigger(S.sel, 0, st);
       persist(); render();
@@ -135,7 +194,7 @@ const padEls = Array.from({ length: STEPS }, (_, s) => {
 
 // sample picker
 function cycleSample(dir) {
-  const i = sampleList.indexOf(S.tracks[S.sel].sample);
+  const i = sampleList.indexOf(snd(S.sel).sample);
   const name = sampleList[(i + dir + sampleList.length) % sampleList.length];
   setSample(S.sel, name).then(() => trigger(S.sel));
 }
@@ -148,7 +207,7 @@ $('sname').onclick = () => {
   for (const name of sampleList) {
     const li = document.createElement('li');
     li.textContent = name.replace(/\.wav$/, '');
-    li.classList.toggle('cur', name === S.tracks[S.sel].sample);
+    li.classList.toggle('cur', name === snd(S.sel).sample);
     li.onclick = (e) => { e.stopPropagation(); setSample(S.sel, name).then(() => trigger(S.sel)); sheet.hidden = true; };
     ul.append(li);
   }
@@ -159,7 +218,9 @@ sheet.onclick = () => (sheet.hidden = true);
 // transport
 const $play = $('play');
 $play.onclick = () => {
-  if (clock.running) { clock.stop(); visualQueue.length = 0; curStep = -1; }
+  if (clock.running) {
+    clock.stop(); visualQueue.length = 0; curStep = -1;
+  }
   else clock.start();
   render();
 };
@@ -173,7 +234,17 @@ $('bpm').addEventListener('pointerdown', (e) => {
   el.addEventListener('pointermove', move);
   el.addEventListener('pointerup', () => el.removeEventListener('pointermove', move), { once: true });
 });
-$('clear').onclick = () => { clearTrack(S.tracks[S.sel]); persist(); render(); };
+// clear: selected track's steps (steps mode) or the whole current pattern (pattern mode)
+$('clear').onclick = () => {
+  if (mode === 'pattern') clearSteps(S); else clearRow(S, S.sel); // sounds are kept
+  persist(); render();
+};
+$('patbtn').onclick = () => {
+  mode = mode === 'pattern' ? 'steps' : 'pattern';
+  if (copySrc !== null) { copySrc = null; hud.classList.remove('show'); }
+  viewBank = Math.floor(S.pat / STEPS);
+  render();
+};
 
 // ---------- waveform + trim ----------
 const canvas = document.querySelector('#wave canvas');
@@ -203,7 +274,7 @@ function drawWave() {
   if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
   g.clearRect(0, 0, W, H);
   const wh = H * (1 - HANDLE_ZONE), r = 16 * dpr;
-  const tr = S.tracks[S.sel], buf = buffers[S.sel];
+  const tr = snd(S.sel), b = buf(S.sel);
 
   g.fillStyle = '#021a2b';
   g.beginPath(); g.roundRect(0, 0, W, wh, r); g.fill();
@@ -213,8 +284,8 @@ function drawWave() {
   g.beginPath(); g.roundRect(0, 0, W, wh, r); g.clip();
   g.fillStyle = '#0b7268';
   g.fillRect(x0, 0, x1 - x0, wh);
-  if (buf) {
-    const p = peaks(buf), pad = W * 0.04, bw = (W - pad * 2) / BARS;
+  if (b) {
+    const p = peaks(b), pad = W * 0.04, bw = (W - pad * 2) / BARS;
     for (let i = 0; i < BARS; i++) {
       const x = pad + i * bw + bw / 2, inside = x >= x0 && x <= x1;
       const bh = Math.max(3 * dpr, p[i] * wh * 0.75);
@@ -246,7 +317,7 @@ function drawWave() {
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
-  const tr = S.tracks[S.sel];
+  const tr = snd(S.sel);
   const rect = canvas.getBoundingClientRect();
   const fx = (e) => clamp((e.clientX - rect.left) / rect.width, 0, 1);
   const x = fx(e);
@@ -274,20 +345,34 @@ function setSquare(el, vol, fx) {
 }
 
 function render() {
-  $tracks.dataset.sel = $pads.dataset.sel = S.sel;
+  const pm = mode === 'pattern';
+  document.documentElement.dataset.mode = mode;
+  const tab = pm ? viewBank : S.sel;
+  $tracks.dataset.sel = $pads.dataset.sel = tab;
   trackEls.forEach((el, t) => {
-    el.parentElement.classList.toggle('sel', t === S.sel);
+    el.parentElement.classList.toggle('sel', t === tab);
+    el.dataset.label = 'ABCD'[t];
+    el.classList.toggle('has-cur', pm && Math.floor(S.pat / STEPS) === t);
     setSquare(el, S.tracks[t].vol, S.tracks[t].fx);
   });
-  const tr = S.tracks[S.sel];
+  const r = row(S.sel);
   padEls.forEach((el, s) => {
-    const st = tr.steps[s];
-    el.classList.toggle('on', st.on);
-    el.classList.toggle('now', s === curStep);
+    if (pm) {
+      const i = viewBank * STEPS + s;
+      el.className = 'btn pad' + (i === S.pat ? ' cur' : '')
+        + (isEmpty(S.patterns[i]) ? '' : ' filled') + (i === copySrc ? ' src' : '');
+      el.dataset.label = patName(i);
+      return;
+    }
+    const st = r[s];
+    el.className = 'btn pad' + (st.on ? ' on' : '') + (s === curStep ? ' now' : '');
     setSquare(el, ((st.pitch || 0) + 12) / 24, st.fx);
-    el.dataset.pitch = st.pitch ? fmtSemis(st.pitch).replace(' st', '') : '';
+    el.dataset.label = st.pitch ? fmtSemis(st.pitch).replace(' st', '') : '';
   });
-  $('sname').textContent = tr.sample.replace(/\.wav$/, '');
+  const pb = $('patbtn');
+  pb.textContent = patName(S.pat);
+  pb.classList.toggle('active', pm);
+  $('sname').textContent = snd(S.sel).sample.replace(/\.wav$/, '');
   $('bpm').textContent = `${S.bpm} bpm`;
   $play.textContent = clock.running ? '■' : '▶';
   drawWave();
@@ -295,8 +380,9 @@ function render() {
 
 function frame() {
   while (visualQueue.length && visualQueue[0].time <= ctx.currentTime) {
-    curStep = visualQueue.shift().step;
-    padEls.forEach((el, s) => el.classList.toggle('now', s === curStep));
+    const v = visualQueue.shift();
+    curStep = v.step;
+    if (mode === 'steps') padEls.forEach((el, s) => el.classList.toggle('now', s === curStep));
   }
   drawWave();
   drawScopes();
@@ -334,6 +420,7 @@ function drawScopes() {
 }
 
 // ---------- boot ----------
+
 const $unlock = $('unlock');
 $unlock.addEventListener('pointerdown', () => { ctx.resume(); $unlock.remove(); });
 // iOS may suspend audio when backgrounded; resume on any touch.
@@ -343,6 +430,9 @@ $('build').textContent = `build ${document.lastModified}`;
 
 setTempo(S.bpm);
 render();
-fetch('assets/samples/index.json').then((r) => r.json()).then((l) => (sampleList = l));
-Promise.all(S.tracks.map((tr, t) => setSample(t, tr.sample, false)));
+fetch('assets/samples/index.json').then((r) => r.json()).then((l) => {
+  sampleList = l;
+  const used = S.patterns.flatMap((p) => p?.sounds.map((x) => x.sample) ?? []);
+  return Promise.all([...new Set([...l, ...used])].map(ensure));
+}).then(render);
 requestAnimationFrame(frame);

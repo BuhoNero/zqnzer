@@ -4,6 +4,7 @@
   --track: #000;
   --pad: #fff;
   --accent: #10a89a;
+  --pat: #ff1fc8;
   --gap: clamp(8px, 3.5vw, 18px);
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -45,24 +46,41 @@ button { font: inherit; color: inherit; touch-action: none; }
 .pad.on { background: var(--accent); }
 .pad.now { box-shadow: 0 0 0 3px #fff, 0 0 0 6px #000; }
 .pad.on.now { background: #19d2c0; }
-/* the corner square is the value indicator: x = reverb ← dry → delay, y = volume */
-.btn::after { content: ""; position: absolute; width: 18%; height: 18%;
+/* the dot is the value indicator: x = reverb ← dry → delay, y = volume (tracks) / pitch (pads) */
+.btn::after { content: ""; position: absolute; width: 20%; height: 20%; border-radius: 50%;
   left: calc(8% + var(--x, .5) * 66%); top: calc(8% + (1 - var(--y, .8)) * 66%);
   pointer-events: none; }
-.pad::before { content: attr(data-pitch); position: absolute; left: 10%; bottom: 8%;
+.pad::before { content: attr(data-label); position: absolute; left: 10%; bottom: 8%;
   font-size: clamp(10px, 3vw, 14px); font-weight: 600; color: #0009; pointer-events: none; }
 .track::after { background: #fff; }
 .scope { position: absolute; left: 8%; right: 8%; bottom: 8%; height: 42%; width: 84%;
   pointer-events: none; }
 .pad::after { background: #000; }
 
-footer { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+/* ---------- pattern mode ---------- */
+html[data-mode="pattern"] .btn::after,
+html[data-mode="pattern"] .scope { display: none; }
+html[data-mode="pattern"] .track::before { content: attr(data-label); position: absolute; inset: 0;
+  display: grid; place-items: center; font-size: clamp(18px, 6vw, 28px); font-weight: 700; color: #fff; }
+html[data-mode="pattern"] .track.has-cur::before { color: var(--pat); }
+html[data-mode="pattern"] .pad::before { left: 0; right: 0; bottom: auto; top: 50%; transform: translateY(-50%);
+  text-align: center; font-size: clamp(13px, 4vw, 18px); color: #0006; }
+.pad.filled { background: #bfe9e4; }
+.pad.cur { background: var(--pat); }
+.pad.cur::before { color: #fff !important; }
+.pad.src { outline: 4px dashed var(--pat); outline-offset: -4px; animation: lift .8s ease-in-out infinite alternate; }
+@keyframes lift { to { transform: scale(.92); } }
+
+#patbtn { min-width: 56px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#patbtn.active { background: var(--pat); color: #fff; }
+
+footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 footer button { border: 0; background: #0003; border-radius: 12px; height: 52px; padding: 0 16px;
   touch-action: manipulation; }
 #play { font-size: 24px; width: 64px; height: 64px; border-radius: 50%; background: #eee; color: #222; }
 #tempo { display: flex; align-items: center; gap: 4px; margin: 0 auto; }
-#tempo button { width: 44px; font-size: 22px; padding: 0; }
-#bpm { min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; font-size: 18px;
+#tempo button { width: 38px; font-size: 22px; padding: 0; }
+#bpm { min-width: 64px; white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; font-size: 16px;
   touch-action: none; cursor: ns-resize; }
 #clear { font-size: 15px; }
 #build { font-size: 10px; opacity: .35; text-align: right; }
