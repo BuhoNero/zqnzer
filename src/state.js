@@ -1,6 +1,6 @@
 // Song state + localStorage persistence.
-// Song = 4 tracks (mute) + 64 patterns (4 banks × 16).
-// A pattern = steps for the 4 tracks + the 4 sounds it uses (sample, trim, vol, fx).
+// Song = tempo + 64 patterns (4 banks × 16).
+// A pattern = steps for the 4 tracks + the 4 sounds it uses (sample, trim, vol, fx, mute).
 
 const KEY = 'zqnzer.v1';
 export const STEPS = 16;
@@ -12,9 +12,9 @@ const DEFAULT_SAMPLES = ['kick.wav', 'snare.wav', 'hat-closed.wav', 'bass-c.wav'
 const newStep = () => ({ on: false, pitch: 0, fx: 0 });
 const newRow = () => Array.from({ length: STEPS }, newStep);
 const newSteps = () => Array.from({ length: TRACKS }, newRow);
-const newSound = (sample) => ({ sample, start: 0, end: 1, vol: 0.8, fx: 0 });
+const newSound = (sample) => ({ sample, start: 0, end: 1, vol: 0.8, fx: 0, mute: false });
 const defaultSounds = () => DEFAULT_SAMPLES.map(newSound);
-const newTrack = () => ({ mute: false });
+const newTrack = () => ({}); // kept for file compatibility; settings live in patterns
 
 function demo() {
   const s = {
@@ -53,8 +53,9 @@ function migrate(s) {
   s.patterns.forEach((p) => p?.sounds.forEach((sd, t) => {
     if (sd.vol === undefined) sd.vol = s.tracks[t].vol ?? 0.8;
     if (sd.fx === undefined) sd.fx = s.tracks[t].fx ?? 0;
+    if (sd.mute === undefined) sd.mute = !!s.tracks[t].mute; // v4: mute was song-wide
   }));
-  s.tracks.forEach((t) => { delete t.vol; delete t.fx; });
+  s.tracks.forEach((t) => { delete t.vol; delete t.fx; delete t.mute; });
   return s;
 }
 

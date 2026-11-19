@@ -1,6 +1,6 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
-import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js?v=202611192158';
-import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192158';
+import { ctx, loadSample, play, createClock, setTempo, meters } from './audio.js?v=202611192207';
+import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192207';
 
 const S = load();
 const decoded = new Map(); // sample name -> AudioBuffer (all preloaded so switching is instant)
@@ -52,7 +52,7 @@ function trigger(t, when, step) {
 // ---------- clock ----------
 const visualQueue = [];
 const clock = createClock(() => S.bpm, (step, time) => {
-  pattern(S).steps.forEach((r, t) => { const st = r[step]; if (st.on && !S.tracks[t].mute) trigger(t, time, st); });
+  pattern(S).steps.forEach((r, t) => { const st = r[step]; if (st.on && !snd(t).mute) trigger(t, time, st); });
   visualQueue.push({ step, time });
 });
 
@@ -170,7 +170,7 @@ const trackEls = Array.from({ length: TRACKS }, (_, t) => {
     onDragStart: () => { S.sel = t; },
     onLongPress: () => {
       if (mode === 'pattern') return false;
-      const tr = S.tracks[t];
+      const tr = snd(t); // mute is per pattern
       tr.mute = !tr.mute;
       showHud(`Track ${t + 1} ${tr.mute ? 'muted' : 'on'}`);
       setTimeout(() => hud.classList.remove('show'), 900);
@@ -443,13 +443,13 @@ function render() {
     el.parentElement.classList.toggle('sel', t === tab);
     el.dataset.label = 'ABCD'[t];
     el.classList.toggle('has-cur', pm && Math.floor(S.pat / STEPS) === t);
-    el.classList.toggle('muted', !!S.tracks[t].mute);
+    el.classList.toggle('muted', !!snd(t).mute);
     el.lastChild.textContent = snd(t).sample.replace(/\.wav$/, '');
     setSquare(el, snd(t).vol, snd(t).fx);
   });
   const r = row(S.sel);
   $pads.style.setProperty('--c', COL[S.sel]);
-  $pads.classList.toggle('muted', !pm && !!S.tracks[S.sel].mute);
+  $pads.classList.toggle('muted', !pm && !!snd(S.sel).mute);
   padEls.forEach((el, s) => {
     if (pm) {
       const i = viewBank * STEPS + s;
@@ -493,7 +493,7 @@ function frame() {
 function hits(step) {
   const steps = pattern(S).steps;
   trackEls.forEach((el, t) => {
-    if (!steps[t][step].on || S.tracks[t].mute) return;
+    if (!steps[t][step].on || snd(t).mute) return;
     const c = mode === 'pattern' ? PINK : COL[t];
     el.animate([{ boxShadow: `0 0 0 3px ${c}, 0 0 14px ${c}` }, { boxShadow: `0 0 0 0 ${c}00, 0 0 0 ${c}00` }],
       { duration: 260, easing: 'ease-out' });
