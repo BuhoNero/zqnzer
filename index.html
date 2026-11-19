@@ -10,11 +10,27 @@
 </head>
 <body>
   <main id="app">
+    <div id="sample">
+      <button id="prev" aria-label="Previous sample">‹</button>
+      <button id="sname"></button>
+      <button id="next" aria-label="Next sample">›</button>
+    </div>
     <section id="wave"><canvas></canvas></section>
     <section id="tracks"></section>
     <section id="pads"></section>
-    <footer><button id="play">▶</button><span id="build"></span></footer>
+    <footer>
+      <button id="play" aria-label="Play">▶</button>
+      <div id="tempo">
+        <button id="slower">−</button>
+        <span id="bpm"></span>
+        <button id="faster">+</button>
+      </div>
+      <button id="clear">clear</button>
+    </footer>
+    <div id="build"></div>
   </main>
+  <div id="hud"></div>
+  <div id="sheet" hidden><ul></ul></div>
   <div id="unlock">tap to start</div>
   <script type="module" src="src/main.js"></script>
 </body>
