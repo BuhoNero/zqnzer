@@ -1,7 +1,7 @@
 // Zqnzer — 16-step, 4-track sample sequencer.
-import { ctx, loadSample, decode, play, createClock, setTempo, meters } from './audio.js?v=202611192213';
-import { MAX_SEC, isUser, userSamples, userWav, userName, loadLibrary, addSample, prepare, embed, unembed } from './usersamples.js?v=202611192213';
-import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611192213';
+import { ctx, loadSample, decode, play, createClock, setTempo, meters } from './audio.js?v=202611201418';
+import { MAX_SEC, isUser, userSamples, userWav, userName, loadLibrary, addSample, prepare, embed, unembed } from './usersamples.js?v=202611201418';
+import { STEPS, TRACKS, load, save, pattern, isEmpty, patName, clearRow, clearSteps, toFile, fromFile } from './state.js?v=202611201418';
 
 const S = load();
 const decoded = new Map(); // sample name -> AudioBuffer (all preloaded so switching is instant)
